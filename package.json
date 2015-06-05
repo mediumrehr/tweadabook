@@ -1,0 +1,24 @@
+{
+  "name": "tweadabook",
+  "version": "1.0.0",
+  "private": true,
+  "description": "twitter bot that tweets a book in 140(ish) character chunks",
+  "main": "twead.js",
+  "scripts": {
+    "start": "node twead.js"
+  },
+  "dependencies": {
+    "pdftotextjs": "0.3.1",
+    "twit": "1.1.20",
+    "node-persist": "0.0.3"
+  },
+  "engines": {
+    "node": "0.12.2",
+    "npm": "2.7.4"
+  },
+  "keywords": [
+    "twitter",
+    "bot"
+  ],
+  "license": "MIT"
+}

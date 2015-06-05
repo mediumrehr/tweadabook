@@ -1,0 +1,3 @@
+https://github.com/reonomy/heroku-buildpack-poppler.git
+https://github.com/heroku/heroku-buildpack-nodejs.git
+https://github.com/heroku/heroku-buildpack-ruby.git
