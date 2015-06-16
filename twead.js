@@ -5,32 +5,27 @@ Description: A twitter bot that tweets a book (pdf) in 140(ish)
   character chunks at a set interval of time.
   www.twitter.com/tweadabook
 Author: Rob Rehr / www.robrehrig.com
-Last edited: June 4, 2015
+Last edited: June 15, 2015
 
 ***************************************/
 
 // Uses twit, node-persist, and pdftotextjs npm modules
 var Twit = require('twit');
-var bookmark = require('node-persist');
 var pdftotext = require('pdftotextjs'),
           pdf = new pdftotext('Lorem_ipsum.pdf');
 
 // Get PDF text and clean it up
-var pdfData = pdf.getTextSync();
-pdfData = pdfData.replace(/[\n\r]+/g, ' '); // replace carriage returns with a space
-pdfData = pdfData.replace(/\t/g, ''); 		// remove tabs
-pdfData = pdfData.replace(/\u2022/g, ''); 	// remove any bullets
-pdfData = pdfData.replace(/\s{2,}/g, ' '); 	// replace double spaces with a single space
+var pdfText = pdf.getTextSync();
+pdfText = pdfText.replace(/[\n\r]+/g, ' '); // replace carriage returns with a space
+pdfText = pdfText.replace(/\t/g, ''); 		// remove tabs
+pdfText = pdfText.replace(/\u2022/g, ''); 	// remove any bullets
+pdfText = pdfText.replace(/\s{2,}/g, ' '); 	// replace double spaces with a single space
 
-var pdfLength = pdfData.length; 			// Length of PDF text
+var currCharLoc = 0;
+var pdfLength = pdfText.length; 			// Length of PDF text
 var totalTweets = Math.ceil(pdfLength/135);	// Estimate number of tweets total by guessing the average tweet is 135 characters
-var tweetInterval = 60; 					// Set time between tweets in minutes (currently 60 min)
-var totalDays = Math.round(totalTweets*tweetInterval/60/24*100)/100; // Estimate number of days it'll take to finish
-
-bookmark.initSync();
-// Figure out location in PDF text
-var currCharLoc = bookmark.getItem('location'); // Recovered location in case server goes down
-if ((currCharLoc < 1) || (currCharLoc === undefined)) currCharLoc = 0;
+var tweetIntervalTime = 60; 				// Set time between tweets in minutes (currently 60 min)
+var totalDays = Math.round(totalTweets*tweetIntervalTime/60/24*100)/100; // Estimate number of days it'll take to finish
 
 /* Make sure to set your environment variables before running,
    or replace the process.env.*'s with the appropriate keys.
@@ -52,78 +47,90 @@ var T = new Twit({
   , access_token_secret:  process.env.ACCESS_TOKEN_SECRET
 })
 
+T.get('statuses/user_timeline', {screen_name: 'tweadabook', count:1}, function (err, data, response) {
+	var updateLoc = pdfText.indexOf(data[0].text);
+	console.log("location: " + updateLoc);
+	if (updateLoc > 0) {
+		var currCharLoc = updateLoc + data[0].text.length;
+		tweetBook(currCharLoc);
+	} else
+		startBook();
+})
+
 // Post name of PDF and time it'll take to tweet
 // Only tweet this info if we're at the beginning of the pdf
-if (currCharLoc == 0) {
+function startBook() {
+	var currCharLoc = 0;
 	var pdfName = pdf.options.additional[0];
 	var titleTweet  = pdfName + ' tweeted over the span of ~' + totalDays + ' days.';
 	T.post('statuses/update', { status: titleTweet}, function(err, data, response) {
 	  console.log(data)
 	});
-// 	console.log(titleTweet);
+	currCharLoc = 0;
+	tweetBook(0);
 }
 
 // Grab the next section of words to tweet
 function get140Chars(charLoc) {
-	// if starting on a space, increment to the next character
-	if (pdfData.charAt(charLoc) == ' ')
-		charLoc++;
-	
 	// Check if we have 140 or more characters to tweet
 	if ((pdfLength - charLoc) >= 140) {
-		var currChars = pdfData.substr(charLoc, 140);
+		var currChars = pdfText.substr(charLoc, 140);
 		var currLength = 140;
 		
 		// Make sure we don't start a new chapter mid tweet
 		var chapterLoc = currChars.search("Chapter");
-		if (chapterLoc > 1) {
+		if (chapterLoc > 1)
 			currChars = currChars.substr(0, chapterLoc);
-			currLength = chapterLoc;
-		} 
-	
 		else {
-			// Check to make sure we don't end a tweet on a partial word
-			if (pdfData.charAt(charLoc + 140) != ' ') {
+			// Check to make sure we don't end a tweet mid-word
+			if (pdfText.charAt(charLoc + 140) != ' ') {
 				while(currChars.charAt(currLength-1) != ' ') {
 					currLength--;
+					// only exception is if the word is longer than 140 characters
 					if (currLength == 0) {
 						currLength = 140;
 						break;
 					}
 				}
+				// string of characters to return
 				currChars = currChars.substr(0, currLength);
 			}
 		}
-		T.post('statuses/update', { status: currChars}, function(err, data, response) {
-		  console.log(data)
-		});
-// 		console.log(currChars);
-
-		// Calculate our new location in the pdf text and store it in case we go down
-		currCharLoc = charLoc + currLength;
-		bookmark.setItem('location',currCharLoc);
-	} else {
-		// We're at the end of the PDF
-		var currChars = pdfData.substr(charLoc, (pdfLength - charLoc));
-		T.post('statuses/update', { status: currChars}, function(err, data, response) {
-		  console.log(data)
-		});
-// 		console.log(currChars);
-
-		currCharLoc = pdfLength;
-		// Set the stored location to zero for the next book
-		bookmark.setItem('location',0);
-	}
+	} else
+		// We're at the end of the PDF, so just grab what's left
+		var currChars = pdfText.substr(charLoc, (pdfLength - charLoc));
+	
+	// return string to tweet
+	return currChars;
 }
 
-var tweetInterval = setInterval(function() {
-  try {
-    get140Chars(currCharLoc);
-    // Stop tweeting when we reach the end of the PDF
-    if (currCharLoc == pdfLength)
-    	clearInterval(tweetInterval);
-  }
- catch (e) {
-    console.log(e);
-  }
-},tweetInterval*60000); // Tweet every x minutes
+// tweet a string of characters, strToTweet
+function tweet140Chars(strToTweet) {
+	T.post('statuses/update', { status: strToTweet}, function(err, data, response) {
+	  console.log(data)
+	});
+}
+
+function tweetBook(currCharLoc) {
+	var tweetInterval = setInterval(function() {
+	  try {
+	  	// if starting on a space, increment to the next character
+		if (pdfText.charAt(currCharLoc) == ' ')
+			currCharLoc++;
+		
+		// grab the next group of words that'll fit in 140 characters and then tweet them
+		var strToTweet = get140Chars(currCharLoc);
+		tweet140Chars(strToTweet);
+		
+		// Calculate our new location in the pdf text and store it in case we go down
+		currCharLoc = currCharLoc + strToTweet.length;
+		
+		// Stop tweeting when we reach the end of the PDF
+		if (currCharLoc == pdfLength)
+			clearInterval(tweetInterval);
+	  }
+	 catch (e) {
+		console.log(e);
+	  }
+	},tweetIntervalTime*60000); // Tweet every x minutes
+}
